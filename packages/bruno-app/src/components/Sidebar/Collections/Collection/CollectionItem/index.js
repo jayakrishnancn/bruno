@@ -7,7 +7,7 @@ import { useDrag, useDrop } from 'react-dnd';
 import { IconChevronRight, IconDots } from '@tabler/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { addTab, focusTab, makeTabPermanent } from 'providers/ReduxStore/slices/tabs';
-import { handleCollectionItemDrop, sendRequest, showInFolder } from 'providers/ReduxStore/slices/collections/actions';
+import { handleCollectionItemDrop, sendRequest, showInFolder, setFoldersCollapsedState } from 'providers/ReduxStore/slices/collections/actions';
 import { toggleCollectionItem } from 'providers/ReduxStore/slices/collections';
 import Dropdown from 'components/Dropdown';
 import NewRequest from 'components/Sidebar/NewRequest';
@@ -20,6 +20,7 @@ import GenerateCodeItem from './GenerateCodeItem';
 import { isItemARequest, isItemAFolder } from 'utils/tabs';
 import { doesRequestMatchSearchText, doesFolderHaveItemsMatchSearchText } from 'utils/collections/search';
 import { getDefaultRequestPaneTab } from 'utils/collections';
+import { getAllFolderUids } from 'utils/collections';
 import { hideHomePage } from 'providers/ReduxStore/slices/app';
 import toast from 'react-hot-toast';
 import StyledWrapper from './StyledWrapper';
@@ -60,8 +61,8 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
   const [dropType, setDropType] = useState(null); // 'adjacent' or 'inside'
 
   const [{ isDragging }, drag, dragPreview] = useDrag({
-    type: `collection-item-${collectionUid}`,
-    item,
+    type: 'collection-item',
+    item: { ...item, sourceCollectionUid: collectionUid },
     collect: (monitor) => ({
       isDragging: monitor.isDragging()
     }),
@@ -92,9 +93,14 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
 
   const canItemBeDropped = ({ draggedItem, targetItem, dropType }) => {
     const { uid: targetItemUid, pathname: targetItemPathname } = targetItem;
-    const { uid: draggedItemUid, pathname: draggedItemPathname } = draggedItem;
+    const { uid: draggedItemUid, pathname: draggedItemPathname, sourceCollectionUid } = draggedItem;
 
     if (draggedItemUid === targetItemUid) return false;
+
+    // For cross-collection moves, we allow the drop
+    if (sourceCollectionUid !== collectionUid) {
+      return true;
+    }
 
     const newPathname = calculateDraggedItemNewPathname({ draggedItem, targetItem, dropType, collectionPathname });
     if (!newPathname) return false;
@@ -105,7 +111,7 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
   };
 
   const [{ isOver, canDrop }, drop] = useDrop({
-    accept: `collection-item-${collectionUid}`,
+    accept: 'collection-item',
     hover: (draggedItem, monitor) => {
       const { uid: targetItemUid } = item;
       const { uid: draggedItemUid } = draggedItem;
@@ -120,14 +126,25 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
     },
     drop: async (draggedItem, monitor) => {
       const { uid: targetItemUid } = item;
-      const { uid: draggedItemUid } = draggedItem;
+      const { uid: draggedItemUid, sourceCollectionUid } = draggedItem;
   
       if (draggedItemUid === targetItemUid) return;
   
       const dropType = determineDropType(monitor);
       if (!dropType) return;
 
-      await dispatch(handleCollectionItemDrop({ targetItem: item, draggedItem, dropType, collectionUid }))
+      // Handle cross-collection drops differently
+      if (sourceCollectionUid !== collectionUid) {
+        await dispatch(handleCollectionItemDrop({ 
+          targetItem: item, 
+          draggedItem, 
+          dropType, 
+          collectionUid, 
+          sourceCollectionUid 
+        }));
+      } else {
+        await dispatch(handleCollectionItemDrop({ targetItem: item, draggedItem, dropType, collectionUid }));
+      }
       setDropType(null);
     },
     canDrop: (draggedItem) => draggedItem.uid !== item.uid,
@@ -269,6 +286,28 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
     });
   };
 
+  const handleToggleAllSubfolders = (collapse) => {
+    if (!isItemAFolder(item)) return;
+
+    const folderUids = getAllFolderUids(item.items || []);
+    const shouldToggleCurrentFolder = collapse ? !item.collapsed : item.collapsed;
+
+    // Handle subfolders if they exist
+    if (folderUids.length) {
+      dispatch(setFoldersCollapsedState(collectionUid, folderUids, collapse));
+    }
+
+    // Toggle current folder if needed
+    if (shouldToggleCurrentFolder) {
+      dispatch(
+        toggleCollectionItem({
+          itemUid: item.uid,
+          collectionUid: collectionUid
+        })
+      );
+    }
+  };
+
   const folderItems = sortByNameThenSequence(filter(item.items, (i) => isItemAFolder(i))); 
   const requestItems = sortItemsBySequence(filter(item.items, (i) => isItemARequest(i)));
  
@@ -406,6 +445,24 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
                   >
                     Run
                   </div>
+                  <div
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      dropdownTippyRef.current.hide();
+                      handleToggleAllSubfolders(false);
+                    }}
+                  >
+                    Expand All
+                  </div>
+                  <div
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      dropdownTippyRef.current.hide();
+                      handleToggleAllSubfolders(true);
+                    }}
+                  >
+                    Collapse All
+                  </div>
                 </>
               )}
               <div
@@ -416,7 +473,7 @@ const CollectionItem = ({ item, collectionUid, collectionPathname, searchText })
                 }}
               >
                 Rename
-              </div>
+              </div> 
               <div
                 className="dropdown-item"
                 onClick={(e) => {

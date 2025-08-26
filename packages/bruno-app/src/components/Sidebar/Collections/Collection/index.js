@@ -6,8 +6,8 @@ import filter from 'lodash/filter';
 import { useDrop, useDrag } from 'react-dnd';
 import { IconChevronRight, IconDots, IconLoader2 } from '@tabler/icons';
 import Dropdown from 'components/Dropdown';
-import { toggleCollection } from 'providers/ReduxStore/slices/collections';
-import { mountCollection, moveCollectionAndPersist, handleCollectionItemDrop } from 'providers/ReduxStore/slices/collections/actions';
+import { toggleCollection } from 'providers/ReduxStore/slices/collections'; 
+import { mountCollection, moveCollectionAndPersist, handleCollectionItemDrop, setFoldersCollapsedState } from 'providers/ReduxStore/slices/collections/actions';
 import { useDispatch, useSelector } from 'react-redux';
 import { addTab, makeTabPermanent } from 'providers/ReduxStore/slices/tabs';
 import NewRequest from 'components/Sidebar/NewRequest';
@@ -15,7 +15,7 @@ import NewFolder from 'components/Sidebar/NewFolder';
 import CollectionItem from './CollectionItem';
 import RemoveCollection from './RemoveCollection';
 import { doesCollectionHaveItemsMatchingSearchText } from 'utils/collections/search';
-import { isItemAFolder, isItemARequest } from 'utils/collections';
+import { isItemAFolder, isItemARequest, getAllFolderUids } from 'utils/collections';
 import { isTabForItemActive } from 'src/selectors/tab';
 
 import RenameCollection from './RenameCollection';
@@ -25,7 +25,8 @@ import { areItemsLoading } from 'utils/collections';
 import { scrollToTheActiveTab } from 'utils/tabs';
 import ShareCollection from 'components/ShareCollection/index';
 import { CollectionItemDragPreview } from './CollectionItem/CollectionItemDragPreview/index';
-import { sortByNameThenSequence } from 'utils/common/index';
+import { sortByNameThenSequence } from 'utils/common/index'; 
+
 
 const Collection = ({ collection, searchText }) => {
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
@@ -140,7 +141,7 @@ const Collection = ({ collection, searchText }) => {
   };
 
   const isCollectionItem = (itemType) => {
-    return itemType.startsWith('collection-item');
+    return itemType === 'collection-item';
   };
 
   const [{ isDragging }, drag, dragPreview] = useDrag({
@@ -155,11 +156,22 @@ const Collection = ({ collection, searchText }) => {
   });
   
   const [{ isOver }, drop] = useDrop({
-    accept: ["collection", `collection-item-${collection.uid}`],
+    accept: ["collection", "collection-item"],
     drop: (draggedItem, monitor) => {
       const itemType = monitor.getItemType();
       if (isCollectionItem(itemType)) {
-        dispatch(handleCollectionItemDrop({ targetItem: collection, draggedItem, dropType: 'inside', collectionUid: collection.uid }))
+        // Handle cross-collection drops
+        if (draggedItem.sourceCollectionUid && draggedItem.sourceCollectionUid !== collection.uid) {
+          dispatch(handleCollectionItemDrop({ 
+            targetItem: collection, 
+            draggedItem, 
+            dropType: 'inside', 
+            collectionUid: collection.uid,
+            sourceCollectionUid: draggedItem.sourceCollectionUid 
+          }));
+        } else {
+          dispatch(handleCollectionItemDrop({ targetItem: collection, draggedItem, dropType: 'inside', collectionUid: collection.uid }));
+        }
       } else {
         dispatch(moveCollectionAndPersist({draggedItem, targetItem: collection}));
       }
@@ -194,6 +206,21 @@ const Collection = ({ collection, searchText }) => {
 
   const requestItems = sortItemsBySequence(filter(collection.items, (i) => isItemARequest(i)));
   const folderItems = sortByNameThenSequence(filter(collection.items, (i) => isItemAFolder(i)));
+
+  // Batched toggle for all folders in a collection
+  const toggleAllFolders = async (collection, dispatch, collapse, ensureCollectionIsMounted) => {
+    await ensureCollectionIsMounted();
+    // Toggle the root collection if needed
+    if (!!collection.collapsed !== collapse) {
+      dispatch(toggleCollection(collection.uid));
+    }
+    // Batched toggle for all folders
+    const folderUids = getAllFolderUids(collection.items);
+    if (folderUids.length) {
+      dispatch(setFoldersCollapsedState(collection.uid, folderUids, collapse));
+    }
+  };
+
 
   return (
     <StyledWrapper className="flex flex-col">
@@ -275,6 +302,24 @@ const Collection = ({ collection, searchText }) => {
               }}
             >
               Run
+            </div>
+            <div
+              className="dropdown-item"
+              onClick={async (e) => {
+                menuDropdownTippyRef.current.hide();
+                await toggleAllFolders(collection, dispatch, false, ensureCollectionIsMounted);
+              }}
+            >
+              Expand All
+            </div>
+            <div
+              className="dropdown-item"
+              onClick={async (e) => {
+                menuDropdownTippyRef.current.hide();
+                await toggleAllFolders(collection, dispatch, true, ensureCollectionIsMounted);
+              }}
+            >
+              Collapse All
             </div>
             <div
               className="dropdown-item"

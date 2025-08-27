@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import cloneDeep from 'lodash/cloneDeep';
 import { get } from 'lodash';
-import { IconTrash, IconAlertCircle, IconDeviceFloppy, IconRefresh, IconCircleCheck } from '@tabler/icons';
+import { IconTrash, IconAlertCircle, IconDeviceFloppy, IconRefresh, IconCircleCheck, IconLink } from '@tabler/icons';
 import { useTheme } from 'providers/Theme';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectEnvironment } from 'providers/ReduxStore/slices/collections/actions';
@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import { Tooltip } from 'react-tooltip';
 import SensitiveFieldWarning from 'components/SensitiveFieldWarning';
 import { getGlobalEnvironmentVariables, flattenItems, isItemARequest } from 'utils/collections';
+import { resolveEnvironmentVariables, getInheritanceChain } from 'utils/environments';
 import { sensitiveFields } from './constants';
 
 const EnvironmentVariables = ({ environment, collection, setIsModified, originalEnvironmentVariables, onClose }) => {
@@ -28,6 +29,38 @@ const EnvironmentVariables = ({ environment, collection, setIsModified, original
   
   const globalEnvironmentVariables = getGlobalEnvironmentVariables({ globalEnvironments, activeGlobalEnvironmentUid });
   _collection.globalEnvironmentVariables = globalEnvironmentVariables;
+
+  // Get inheritance chain and inherited variables
+  const inheritanceChain = useMemo(() => {
+    return getInheritanceChain(environment, collection.environments || []);
+  }, [environment, collection.environments]);
+
+  const inheritedVariables = useMemo(() => {
+    if (!environment.parentEnvironmentUid) {
+      return [];
+    }
+    
+    // Get variables from parent environments (excluding current environment)
+    const parentChain = inheritanceChain.slice(0, -1);
+    const inheritedVars = new Map();
+    
+    parentChain.forEach(env => {
+      if (env.variables) {
+        env.variables.forEach(variable => {
+          if (!inheritedVars.has(variable.name)) {
+            inheritedVars.set(variable.name, {
+              ...variable,
+              inheritedFrom: env.name
+            });
+          }
+        });
+      }
+    });
+    
+    // Filter out variables that are overridden in current environment
+    const currentVarNames = new Set((environment.variables || []).map(v => v.name));
+    return Array.from(inheritedVars.values()).filter(v => !currentVarNames.has(v.name));
+  }, [environment, inheritanceChain]);
 
   const nonSecretSensitiveVarUsageMap = useMemo(() => {
     const result = {};
@@ -172,7 +205,99 @@ const EnvironmentVariables = ({ environment, collection, setIsModified, original
 
   return (
     <StyledWrapper className="w-full mt-6 mb-6">
+      {inheritanceChain.length > 1 && (
+        <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <IconLink size={16} className="inline mr-1" />
+            Inheritance Chain:
+          </div>
+          <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center flex-wrap">
+            {inheritanceChain.map((env, index) => (
+              <React.Fragment key={env.uid}>
+                <span className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded text-xs mr-1 mb-1">
+                  {env.name}
+                </span>
+                {index < inheritanceChain.length - 1 && (
+                  <span className="text-gray-400 mx-1 mb-1">→</span>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+            Variables from parent environments are inherited. Local variables override inherited ones.
+          </div>
+        </div>
+      )}
+
       <div className="h-[50vh] overflow-y-auto w-full">
+        {inheritedVariables.length > 0 && (
+          <>
+            <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <IconLink size={14} className="mr-1" />
+              Inherited Variables (Read-only)
+            </div>
+            <table className="mb-4 border border-gray-200 dark:border-gray-700 rounded">
+              <thead className="bg-gray-100 dark:bg-gray-800">
+                <tr>
+                  <td className="text-center px-2 py-1 text-xs font-medium">Enabled</td>
+                  <td className="px-2 py-1 text-xs font-medium">Name</td>
+                  <td className="px-2 py-1 text-xs font-medium">Value</td>
+                  <td className="text-center px-2 py-1 text-xs font-medium">Secret</td>
+                  <td className="px-2 py-1 text-xs font-medium">From</td>
+                </tr>
+              </thead>
+              <tbody>
+                {inheritedVariables.map((variable) => (
+                  <tr key={`inherited-${variable.uid}`} className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-75">
+                    <td className="text-center px-2 py-1">
+                      <input
+                        type="checkbox"
+                        checked={variable.enabled}
+                        disabled
+                        className="cursor-not-allowed opacity-60"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="text"
+                        value={variable.name}
+                        disabled
+                        className="w-full bg-transparent border-none cursor-not-allowed opacity-75 text-xs"
+                        readOnly
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="text"
+                        value={variable.secret ? '••••••••' : variable.value}
+                        disabled
+                        className="w-full bg-transparent border-none cursor-not-allowed opacity-75 text-xs"
+                        readOnly
+                      />
+                    </td>
+                    <td className="text-center px-2 py-1">
+                      <input
+                        type="checkbox"
+                        checked={variable.secret}
+                        disabled
+                        className="cursor-not-allowed opacity-60"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                        {variable.inheritedFrom}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 mt-4">
+              Local Variables
+            </div>
+          </>
+        )}
+        
         <table>
           <thead>
             <tr>

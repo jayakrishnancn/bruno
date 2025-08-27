@@ -19,6 +19,7 @@ import {
   isItemARequest,
   transformRequestToSaveToFilesystem
 } from 'utils/collections';
+import { getAllDescendantEnvironments } from 'utils/environments';
 import { uuid, waitForNextTick } from 'utils/common';
 import { cancelNetworkRequest, sendGrpcRequest, sendNetworkRequest } from 'utils/network/index';
 import { callIpc } from 'utils/common/ipc';
@@ -1102,7 +1103,7 @@ export const generateGrpcurlCommand = (item, collectionUid) => async (dispatch, 
   });
 };
 
-export const addEnvironment = (name, collectionUid) => (dispatch, getState) => {
+export const addEnvironment = (name, collectionUid, parentEnvironmentUid = null) => (dispatch, getState) => {
   return new Promise((resolve, reject) => {
     const state = getState();
     const collection = findCollectionByUid(state.collections.collections, collectionUid);
@@ -1112,7 +1113,7 @@ export const addEnvironment = (name, collectionUid) => (dispatch, getState) => {
 
     const { ipcRenderer } = window;
     ipcRenderer
-      .invoke('renderer:create-environment', collection.pathname, name)
+      .invoke('renderer:create-environment', collection.pathname, name, null, parentEnvironmentUid)
       .then(
         dispatch(
           updateLastAction({
@@ -1175,7 +1176,7 @@ export const copyEnvironment = (name, baseEnvUid, collectionUid) => (dispatch, g
 
     const { ipcRenderer } = window;
     ipcRenderer
-      .invoke('renderer:create-environment', collection.pathname, sanitizedName, baseEnv.variables)
+      .invoke('renderer:create-environment', collection.pathname, sanitizedName, baseEnv.variables, baseEnv.parentEnvironmentUid)
       .then(
         dispatch(
           updateLastAction({
@@ -1234,15 +1235,26 @@ export const deleteEnvironment = (environmentUid, collectionUid) => (dispatch, g
       return reject(new Error('Environment not found'));
     }
 
+    // Get all descendant environments that will be deleted
+    const descendantEnvironments = getAllDescendantEnvironments(environment, collection.environments || []);
+    
+    // Create list of all environments to delete (parent + all descendants)
+    const environmentsToDelete = [environment, ...descendantEnvironments];
+    
     const { ipcRenderer } = window;
-    ipcRenderer
-      .invoke('renderer:delete-environment', collection.pathname, environment.name)
+    
+    // Delete all environments (parent and descendants) sequentially
+    const deletePromises = environmentsToDelete.map(env => 
+      ipcRenderer.invoke('renderer:delete-environment', collection.pathname, env.name)
+    );
+    
+    Promise.all(deletePromises)
       .then(resolve)
       .catch(reject);
   });
 };
 
-export const saveEnvironment = (variables, environmentUid, collectionUid) => (dispatch, getState) => {
+export const saveEnvironment = (variables, environmentUid, collectionUid, parentEnvironmentUid = undefined) => (dispatch, getState) => {
   return new Promise((resolve, reject) => {
     const state = getState();
     const collection = findCollectionByUid(state.collections.collections, collectionUid);
@@ -1257,6 +1269,11 @@ export const saveEnvironment = (variables, environmentUid, collectionUid) => (di
     }
 
     environment.variables = variables;
+    
+    // Update parent environment if provided
+    if (parentEnvironmentUid !== undefined) {
+      environment.parentEnvironmentUid = parentEnvironmentUid;
+    }
 
     const { ipcRenderer } = window;
     environmentSchema

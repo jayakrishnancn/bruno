@@ -2,6 +2,8 @@ const _ = require('lodash');
 
 const envToJson = (json) => {
   const variables = _.get(json, 'variables', []);
+  const parentEnvironmentUid = _.get(json, 'parentEnvironmentUid', null);
+  
   const vars = variables
     .filter((variable) => !variable.secret)
     .map((variable) => {
@@ -18,13 +20,22 @@ const envToJson = (json) => {
       return `  ${prefix}${name}`;
     });
 
-  if (!variables || !variables.length) {
-    return `vars {
-}
+  let output = '';
+  
+  // Add parent environment if it exists
+  if (parentEnvironmentUid) {
+    output += `inherit: ${parentEnvironmentUid}
+
 `;
   }
 
-  let output = '';
+  if (!variables || !variables.length) {
+    output += `vars {
+}
+`;
+    return output;
+  }
+
   if (vars.length) {
     output += `vars {
 ${vars.join('\n')}

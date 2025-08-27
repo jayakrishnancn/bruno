@@ -2,7 +2,7 @@ const ohm = require('ohm-js');
 const _ = require('lodash');
 
 const grammar = ohm.grammar(`Bru {
-  BruEnvFile = (vars | secretvars)*
+  BruEnvFile = (inherit | vars | secretvars)*
 
   nl = "\\r"? "\\n"
   st = " " | "\\t"
@@ -11,6 +11,11 @@ const grammar = ohm.grammar(`Bru {
   optionalnl = ~tagend nl
   keychar = ~(tagend | st | nl | ":") any
   valuechar = ~(nl | tagend) any
+  inheritvalue = ~nl any
+
+  // Inheritance
+  inherit = "inherit:" st* inherituid st* nl?
+  inherituid = inheritvalue*
 
   // Dictionary Blocks
   dictionary = st* "{" pairlist? tagend
@@ -95,6 +100,14 @@ const sem = grammar.createSemantics().addAttribute('ast', {
       },
       {}
     );
+  },
+  inherit(_1, _2, inherituid, _3, _4) {
+    return {
+      parentEnvironmentUid: inherituid.ast
+    };
+  },
+  inherituid(chars) {
+    return chars.sourceString ? chars.sourceString.trim() : '';
   },
   array(_1, _2, _3, valuelist, _4, _5) {
     return valuelist.ast;

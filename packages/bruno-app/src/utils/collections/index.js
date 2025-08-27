@@ -887,7 +887,13 @@ export const getEnvironmentVariables = (collection) => {
   if (collection) {
     const environment = findEnvironmentInCollection(collection, collection.activeEnvironmentUid);
     if (environment) {
-      each(environment.variables, (variable) => {
+      // Import the inheritance resolution function
+      const { resolveEnvironmentVariables } = require('../environments');
+      
+      // Get resolved variables including inheritance
+      const resolvedVariables = resolveEnvironmentVariables(environment, collection.environments || []);
+      
+      each(resolvedVariables, (variable) => {
         if (variable.name && variable.value && variable.enabled) {
           variables[variable.name] = variable.value;
         }
@@ -906,12 +912,18 @@ export const getEnvironmentVariablesMasked = (collection) => {
 
   // Find the active environment in the collection
   const environment = findEnvironmentInCollection(collection, collection.activeEnvironmentUid);
-  if (!environment || !environment.variables) {
+  if (!environment) {
     return [];
   }
 
-  // Filter the environment variables to get only the masked (secret) ones
-  return environment.variables
+  // Import the inheritance resolution function
+  const { resolveEnvironmentVariables } = require('../environments');
+  
+  // Get resolved variables including inheritance
+  const resolvedVariables = resolveEnvironmentVariables(environment, collection.environments || []);
+
+  // Filter the resolved variables to get only the masked (secret) ones
+  return resolvedVariables
     .filter((variable) => variable.name && variable.value && variable.enabled && variable.secret)
     .map((variable) => variable.name);
 };

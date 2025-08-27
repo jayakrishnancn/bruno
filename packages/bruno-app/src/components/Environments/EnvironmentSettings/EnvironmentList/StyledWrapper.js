@@ -24,13 +24,30 @@ const StyledWrapper = styled.div`
     border-left: solid 2px transparent;
     text-decoration: none;
     max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
     white-space: nowrap;
 
     &:hover {
       text-decoration: none;
       background-color: ${(props) => props.theme.collection.environment.settings.item.hoverBg};
+    }
+
+    .expand-icon {
+      color: ${(props) => props.theme.colors.text.muted};
+      transition: transform 0.2s ease;
+      
+      &:hover {
+        color: ${(props) => props.theme.colors.text.normal};
+      }
+    }
+
+    .expand-icon-placeholder {
+      display: inline-block;
+    }
+
+    .inheritance-indicator {
+      opacity: 0.6;
+      font-size: 10px;
     }
   }
 
